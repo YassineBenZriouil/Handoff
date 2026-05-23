@@ -1,0 +1,10 @@
+engine/venv/
+engine/dist/
+engine/__pycache__/
+engine/*.spec
+engine/*.task
+ui/node_modules/
+ui/dist/
+ui/.vite/
+*.pyc
+.DS_Store

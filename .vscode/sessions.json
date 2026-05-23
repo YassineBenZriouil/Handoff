@@ -1,0 +1,40 @@
+{
+  "$schema": "https://cdn.statically.io/gh/nguyenngoclongdev/cdn/main/schema/v11/terminal-keeper.json",
+  "theme": "tribe",
+  "active": "default",
+  "activateOnStartup": true,
+  "keepExistingTerminals": false,
+  "sessions": {
+    "default": [
+      {
+        "name": "Engine",
+        "autoExecuteCommands": true,
+        "icon": "zap",
+        "color": "terminal.ansiGreen",
+        "commands": [
+          "cd engine",
+          ".\\venv\\Scripts\\python.exe main.py"
+        ]
+      },
+      {
+        "name": "UI",
+        "autoExecuteCommands": true,
+        "icon": "browser",
+        "color": "terminal.ansiCyan",
+        "commands": [
+          "cd ui",
+          "npm run start"
+        ]
+      },
+      {
+        "name": "Claude",
+        "autoExecuteCommands": true,
+        "icon": "robot",
+        "color": "terminal.ansiBlue",
+        "commands": [
+          "claude"
+        ]
+      }
+    ]
+  }
+}
