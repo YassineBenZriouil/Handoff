@@ -47,13 +47,11 @@ async def _sender():
         if data is None:
             continue
         msg  = json.dumps(data)
-        dead = set()
         for c in list(clients):
             try:
                 await c.send(msg)
             except Exception:
-                dead.add(c)
-        clients -= dead
+                clients.discard(c)
 
 
 async def start_server():

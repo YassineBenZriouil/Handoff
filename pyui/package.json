@@ -1,0 +1,7 @@
+{
+  "name": "handoff-pyui",
+  "private": true,
+  "scripts": {
+    "dev": "..\\engine\\venv\\Scripts\\python.exe main.py"
+  }
+}

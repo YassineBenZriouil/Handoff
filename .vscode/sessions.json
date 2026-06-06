@@ -7,23 +7,13 @@
   "sessions": {
     "default": [
       {
-        "name": "Engine",
+        "name": "HandOff",
         "autoExecuteCommands": true,
         "icon": "zap",
         "color": "terminal.ansiGreen",
+        "cwd": "${workspaceFolder}/pyui",
         "commands": [
-          "cd engine",
-          ".\\venv\\Scripts\\python.exe main.py"
-        ]
-      },
-      {
-        "name": "UI",
-        "autoExecuteCommands": true,
-        "icon": "browser",
-        "color": "terminal.ansiCyan",
-        "commands": [
-          "cd ui",
-          "npm run start"
+          "npm run dev"
         ]
       },
       {

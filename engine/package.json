@@ -1,0 +1,7 @@
+{
+  "name": "handoff-engine",
+  "private": true,
+  "scripts": {
+    "dev": "venv\\Scripts\\python.exe main.py"
+  }
+}

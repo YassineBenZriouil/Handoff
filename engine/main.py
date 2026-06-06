@@ -48,44 +48,38 @@ def kill_camera_users():
 
 
 def open_camera():
-    backends = [cv2.CAP_DSHOW, cv2.CAP_MSMF, 0]  # 0 = default
     for idx in range(3):
-        for backend in backends:
-            print(f'Trying camera index {idx} backend {backend}...')
-            cap = cv2.VideoCapture(idx, backend) if backend else cv2.VideoCapture(idx)
-            if not cap.isOpened():
-                cap.release()
-                continue
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            cap.set(cv2.CAP_PROP_FPS, 30)
-            # Try reading a few frames — some drivers need a moment
-            for attempt in range(10):
-                ret, frame = cap.read()
-                if ret:
-                    print(f'Camera ready: index={idx} backend={backend} attempt={attempt}')
-                    return cap
-                time.sleep(0.05)
+        print(f'Trying camera index {idx} (DSHOW)...')
+        cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            print(f'  index {idx}: isOpened=False')
             cap.release()
+            continue
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        ret, _ = cap.read()
+        if ret:
+            print(f'Camera ready at index {idx}')
+            return cap
+        print(f'  index {idx}: read failed')
+        cap.release()
 
     print('Camera busy — killing holders and retrying...')
     kill_camera_users()
-    time.sleep(1.5)
+    time.sleep(1.0)
 
-    for idx in range(3):
-        cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-        if cap.isOpened():
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            for _ in range(10):
-                ret, _ = cap.read()
-                if ret:
-                    print(f'Camera ready after kill: index={idx}')
-                    return cap
-                time.sleep(0.05)
-            cap.release()
-
-    return None   # caller handles None — engine still runs, just no camera
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    if cap.isOpened():
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        ret, _ = cap.read()
+        if ret:
+            print('Camera ready at index 0 (after kill)')
+            return cap
+    cap.release()
+    return None
 
 
 # ── Start WebSocket server first so UI can connect immediately ────────────────
@@ -106,10 +100,9 @@ tracker  = HandTracker()
 smoother = SmoothCursor(buffer_size=6)
 cap      = open_camera()
 
+print('HandOff engine running. Ctrl+C to quit.')
 if cap is None:
-    print('ERROR: No camera found. Engine running without camera — UI will stay blank.')
-else:
-    print('HandOff engine running. Ctrl+C to quit.')
+    print('Camera not found yet — will keep retrying.')
 
 GESTURE_ACTIONS = {
     'SWIPE_LEFT':  swipe_left,
@@ -123,15 +116,26 @@ fail_count  = 0
 last_stat   = time.time()
 
 try:
-    while cap is not None:
+    while True:
+        if cap is None:
+            time.sleep(2.0)
+            print('Attempting camera recovery...')
+            cap = open_camera()
+            if cap is None:
+                print('Camera unavailable, retrying in 5s...')
+                time.sleep(5.0)
+            continue
+
         ret, frame = cap.read()
         if not ret:
             fail_count += 1
-            print(f'cap.read() failed ({fail_count})')
             if fail_count >= 30:
-                print('ERROR: Lost webcam feed.')
-                break
-            time.sleep(0.05)
+                print('Lost webcam feed — attempting recovery...')
+                cap.release()
+                cap = None
+                fail_count = 0
+            else:
+                time.sleep(0.05)
             continue
         fail_count   = 0
         frame_count += 1
