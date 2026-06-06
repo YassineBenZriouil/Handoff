@@ -1,46 +1,7 @@
 {
-  "name": "handoff-ui",
-  "version": "1.0.0",
+  "name": "handoff-pyui",
   "private": true,
-  "main": "electron/main.js",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "electron": "electron .",
-    "start": "cross-env NODE_ENV=development concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
-    "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac"
-  },
-  "build": {
-    "appId": "com.handoff.app",
-    "productName": "HandOff",
-    "extraResources": [
-      {
-        "from": "../engine/dist/",
-        "to": "engine/",
-        "filter": ["**/*"]
-      }
-    ],
-    "win": {
-      "target": "nsis",
-      "icon": "assets/icon.ico"
-    },
-    "mac": {
-      "target": "dmg",
-      "icon": "assets/icon.icns"
-    }
-  },
-  "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.1",
-    "concurrently": "^9.1.2",
-    "cross-env": "^7.0.3",
-    "electron": "^33.2.1",
-    "electron-builder": "^25.1.8",
-    "vite": "^6.0.3",
-    "wait-on": "^8.0.1"
+    "dev": "..\\engine\\venv\\Scripts\\python.exe main.py"
   }
 }

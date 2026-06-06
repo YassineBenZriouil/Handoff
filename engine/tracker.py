@@ -21,17 +21,19 @@ class HandTracker:
 
         options = vision.HandLandmarkerOptions(
             base_options=python.BaseOptions(model_asset_path=MODEL_PATH),
-            num_hands=1,
+            num_hands=2,
             min_hand_detection_confidence=0.7,
             min_hand_presence_confidence=0.7,
             min_tracking_confidence=0.7,
         )
         self.detector = vision.HandLandmarker.create_from_options(options)
 
-    def get_landmarks(self, frame):
+    def get_all_landmarks(self, frame):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         result = self.detector.detect(mp_image)
-        if result.hand_landmarks:
-            return result.hand_landmarks[0]
-        return None
+        return result.hand_landmarks  # list of up to 2 hands
+
+    def get_landmarks(self, frame):
+        hands = self.get_all_landmarks(frame)
+        return hands[0] if hands else None

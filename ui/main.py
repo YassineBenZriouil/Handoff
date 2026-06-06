@@ -13,20 +13,32 @@ from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont
 
 from tracker import HandTracker
-from gestures import classify
-from controller import move_cursor, click, swipe_left, swipe_right, zoom_in, zoom_out
+from gestures import classify_all
+from controller import (move_cursor, click, right_click, double_click,
+                        swipe_left, swipe_right, zoom_in, zoom_out, scroll,
+                        tab_right, tab_left)
 from smoother import SmoothCursor
 
-SAFE_PROCESSES = {'electron.exe', 'node.exe', 'code.exe', 'python.exe', 'explorer.exe'}
+SAFE_PROCESSES = {'electron.exe', 'node.exe', 'code.exe', 'explorer.exe'}
+_OWN_PID = os.getpid()
 
 GESTURE_LABELS = {
-    'CLICK':       '🤏 Click',
-    'SWIPE_LEFT':  '👈 Swipe Left',
-    'SWIPE_RIGHT': '👉 Swipe Right',
-    'ZOOM_IN':     '🔍 Zoom In',
-    'ZOOM_OUT':    '🔎 Zoom Out',
-    'MOVE':        '☝️ Move',
+    'CLICK':        '🤏 Click',
+    'RIGHT_CLICK':  '🖱️ Right Click',
+    'DOUBLE_CLICK': '🤏🤏 Double Click',
+    'SWIPE_LEFT':   '👈 Swipe Left',
+    'SWIPE_RIGHT':  '👉 Swipe Right',
+    'ZOOM_IN':      '🔍 Zoom In',
+    'ZOOM_OUT':     '🔎 Zoom Out',
+    'SCROLL_UP':    '⬆️ Scroll Up',
+    'SCROLL_DOWN':  '⬇️ Scroll Down',
+    'TAB_RIGHT':    '➡️ Next Window',
+    'TAB_LEFT':     '⬅️ Prev Window',
+    'MOVE':         '☝️ Move',
 }
+
+# Color per hand: hand 0 = green, hand 1 = cyan
+HAND_COLORS = ['#4ade80', '#22d3ee']
 
 CONNECTIONS = [
     (0,1),(1,2),(2,3),(3,4),
@@ -36,6 +48,18 @@ CONNECTIONS = [
     (0,17),(17,18),(18,19),(19,20),
     (5,9),(9,13),(13,17),
 ]
+
+DISPATCH = {
+    'SWIPE_LEFT':  swipe_left,
+    'SWIPE_RIGHT': swipe_right,
+    'ZOOM_IN':     zoom_in,
+    'ZOOM_OUT':    zoom_out,
+    'SCROLL_UP':   lambda: scroll('up'),
+    'SCROLL_DOWN': lambda: scroll('down'),
+    'RIGHT_CLICK': right_click,
+    'TAB_RIGHT':   tab_right,
+    'TAB_LEFT':    tab_left,
+}
 
 
 def kill_camera_users():
@@ -59,47 +83,65 @@ def kill_camera_users():
             winreg.CloseKey(sub_key)
             if stop == 0:
                 exe_name = os.path.basename(sub_name.replace('#', os.sep)).lower()
-                if exe_name not in SAFE_PROCESSES:
+                if exe_name not in SAFE_PROCESSES and exe_name != 'python.exe':
                     r = subprocess.run(['taskkill', '/F', '/IM', exe_name], capture_output=True)
                     if r.returncode == 0:
-                        print(f'Killed {exe_name} (was holding camera)')
+                        print(f'Killed {exe_name} (was holding camera)', flush=True)
         except (OSError, FileNotFoundError):
             pass
         i += 1
     winreg.CloseKey(key)
 
 
-def open_camera():
-    for idx in range(3):
-        cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-        if not cap.isOpened():
-            cap.release()
-            continue
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        ret, _ = cap.read()
-        if ret:
-            print(f'Camera ready at index {idx}')
-            return cap
+def _try_open(idx, backend=cv2.CAP_DSHOW):
+    label = 'DSHOW' if backend == cv2.CAP_DSHOW else 'MSMF'
+    print(f'[CAM] Trying index {idx} ({label})...', flush=True)
+    cap = cv2.VideoCapture(idx, backend)
+    print(f'[CAM] Index {idx} opened={cap.isOpened()}', flush=True)
+    if not cap.isOpened():
         cap.release()
-
-    kill_camera_users()
-    time.sleep(1.0)
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    if cap.isOpened():
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        ret, _ = cap.read()
-        if ret:
-            return cap
+        return None
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    ret, _ = cap.read()
+    print(f'[CAM] Index {idx} read={ret}', flush=True)
+    if ret:
+        return cap
     cap.release()
     return None
 
 
+def open_camera():
+    for backend, label in ((cv2.CAP_DSHOW, 'DSHOW'), (cv2.CAP_MSMF, 'MSMF')):
+        print(f'[CAM] Scanning via {label}...', flush=True)
+        for idx in range(3):
+            cap = _try_open(idx, backend)
+            if cap:
+                print(f'Camera ready at index {idx} ({label})', flush=True)
+                return cap
+
+    print('[CAM] All failed — killing camera holders and retrying...', flush=True)
+    kill_camera_users()
+    time.sleep(1.0)
+
+    for backend, label in ((cv2.CAP_DSHOW, 'DSHOW'), (cv2.CAP_MSMF, 'MSMF')):
+        for idx in range(3):
+            cap = _try_open(idx, backend)
+            if cap:
+                print(f'Camera ready at index {idx} ({label}) after kill', flush=True)
+                return cap
+
+    print('[CAM] Camera unavailable', flush=True)
+    return None
+
+
+FRAME_INTERVAL = 1.0 / 30
+
+
 class EngineThread(QThread):
-    frame_ready = Signal(object, object, str)  # frame(np), landmarks, gesture
+    # frame(np), hands(list of landmark lists), gestures(list of (gesture, pos))
+    frame_ready = Signal(object, list, list)
 
     def __init__(self):
         super().__init__()
@@ -111,10 +153,17 @@ class EngineThread(QThread):
     def run(self):
         cap = open_camera()
         fail_count = 0
+        frame_count = 0
+        fps_t = time.time()
+        last_emit = 0.0
 
         while self._running:
             if cap is None:
-                time.sleep(2.0)
+                print('[DEBUG] No camera — retrying in 2s', flush=True)
+                for _ in range(20):  # 2s in 100ms chunks — interruptible
+                    if not self._running:
+                        return
+                    time.sleep(0.1)
                 cap = open_camera()
                 continue
 
@@ -122,7 +171,7 @@ class EngineThread(QThread):
             if not ret:
                 fail_count += 1
                 if fail_count >= 30:
-                    print('Lost webcam feed — recovering...')
+                    print('[DEBUG] Lost feed after 30 failures — reopening')
                     cap.release()
                     cap = None
                     fail_count = 0
@@ -131,21 +180,37 @@ class EngineThread(QThread):
                 continue
 
             fail_count = 0
+
+            now = time.time()
+            if now - last_emit < FRAME_INTERVAL:
+                continue
+            last_emit = now
+
             h, w = frame.shape[:2]
-            landmarks = self.tracker.get_landmarks(frame)
-            gesture, pos = classify(landmarks, w, h)
+            hands = self.tracker.get_all_landmarks(frame)
+            gestures = classify_all(hands, w, h)
 
             if not self.paused:
-                if gesture == 'MOVE' and pos:
-                    sx, sy = self.smoother.smooth(pos[0] / w, pos[1] / h)
-                    move_cursor(sx, sy)
-                elif gesture == 'CLICK':
-                    click()
-                elif gesture in ('SWIPE_LEFT', 'SWIPE_RIGHT', 'ZOOM_IN', 'ZOOM_OUT'):
-                    {'SWIPE_LEFT': swipe_left, 'SWIPE_RIGHT': swipe_right,
-                     'ZOOM_IN': zoom_in, 'ZOOM_OUT': zoom_out}[gesture]()
+                moved = False
+                for i, (gesture, pos) in enumerate(gestures):
+                    if gesture == 'MOVE' and pos and not moved:
+                        sx, sy = self.smoother.smooth(pos[0] / w, pos[1] / h)
+                        move_cursor(sx, sy)
+                        moved = True
+                    elif gesture == 'CLICK':
+                        click()
+                    elif gesture in DISPATCH:
+                        DISPATCH[gesture]()
 
-            self.frame_ready.emit(frame, landmarks, gesture or '')
+            self.frame_ready.emit(frame.copy(), hands, gestures)
+
+            frame_count += 1
+            if frame_count % 30 == 0:
+                elapsed = time.time() - fps_t
+                total_lm = sum(len(h) for h in hands)
+                g_str = ', '.join(g for g, _ in gestures if g) or 'none'
+                print(f'[DEBUG] {30/elapsed:.1f} fps | {len(hands)} hand(s) | {total_lm} lm | {g_str}')
+                fps_t = time.time()
 
         if cap:
             cap.release()
@@ -161,14 +226,16 @@ class CameraView(QLabel):
         self.setMinimumSize(640, 480)
         self.setAlignment(Qt.AlignCenter)
         self.setStyleSheet('background: #0a0a0a;')
-        self._landmarks = []
+        self.setAttribute(Qt.WA_OpaquePaintEvent, True)
+        self._hands = []
         self._pixmap = None
+        self._rgb = None
 
-    def update_frame(self, frame, landmarks):
-        self._landmarks = landmarks or []
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h, w, ch = rgb.shape
-        img = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
+    def update_frame(self, frame, hands):
+        self._hands = hands or []
+        self._rgb = np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        h, w = self._rgb.shape[:2]
+        img = QImage(self._rgb.data, w, h, self._rgb.strides[0], QImage.Format_RGB888)
         self._pixmap = QPixmap.fromImage(img)
         self.update()
 
@@ -182,21 +249,23 @@ class CameraView(QLabel):
             y_off = (self.height() - scaled.height()) // 2
             painter.drawPixmap(x_off, y_off, scaled)
 
-            if self._landmarks:
-                pw = scaled.width()
-                ph = scaled.height()
+            pw = scaled.width()
+            ph = scaled.height()
 
-                pen = QPen(QColor('#4ade80'), 2)
+            for hand_idx, landmarks in enumerate(self._hands):
+                color = HAND_COLORS[hand_idx % len(HAND_COLORS)]
+
+                pen = QPen(QColor(color), 2)
                 painter.setPen(pen)
                 for a, b in CONNECTIONS:
-                    if a < len(self._landmarks) and b < len(self._landmarks):
-                        la, lb = self._landmarks[a], self._landmarks[b]
+                    if a < len(landmarks) and b < len(landmarks):
+                        la, lb = landmarks[a], landmarks[b]
                         painter.drawLine(
                             int(la.x * pw) + x_off, int(la.y * ph) + y_off,
                             int(lb.x * pw) + x_off, int(lb.y * ph) + y_off,
                         )
 
-                for i, lm in enumerate(self._landmarks):
+                for i, lm in enumerate(landmarks):
                     x = int(lm.x * pw) + x_off
                     y = int(lm.y * ph) + y_off
                     if i == 8:
@@ -206,7 +275,7 @@ class CameraView(QLabel):
                         painter.setBrush(QColor('#f87171'))
                         r = 7
                     else:
-                        painter.setBrush(QColor('white'))
+                        painter.setBrush(QColor(color))
                         r = 4
                     painter.setPen(Qt.NoPen)
                     painter.drawEllipse(x - r, y - r, r * 2, r * 2)
@@ -220,6 +289,12 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('HandOff')
+        # Never steal keyboard focus — pynput keys go to the app the user is actually using
+        self.setWindowFlags(
+            Qt.Window |
+            Qt.WindowStaysOnTopHint |
+            Qt.WindowDoesNotAcceptFocus
+        )
         self.setStyleSheet('''
             QWidget { background: #111; color: #eee; font-family: Arial; }
             QPushButton {
@@ -227,7 +302,6 @@ class MainWindow(QWidget):
                 padding: 8px 20px; border-radius: 6px; font-size: 13px;
             }
             QPushButton:hover { background: #2563eb; }
-            QPushButton.paused { background: #166534; }
             QPushButton:disabled { background: #333; color: #666; }
             QLabel#status_on  { color: #4ade80; font-size: 13px; }
             QLabel#status_off { color: #f87171; font-size: 13px; }
@@ -256,10 +330,9 @@ class MainWindow(QWidget):
         footer = QHBoxLayout()
         footer.addWidget(self.gesture_label)
         footer.addStretch()
-        lm_label = QLabel('landmarks: —')
-        lm_label.setStyleSheet('color: #888; font-size: 12px;')
-        self.lm_label = lm_label
-        footer.addWidget(lm_label)
+        self.lm_label = QLabel('No hands')
+        self.lm_label.setStyleSheet('color: #888; font-size: 12px;')
+        footer.addWidget(self.lm_label)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -279,23 +352,24 @@ class MainWindow(QWidget):
         self.status_label.setText('● Running')
         self.status_label.setObjectName('status_on')
 
-    def on_frame(self, frame, landmarks, gesture):
-        self.camera_view.update_frame(frame, landmarks)
-        lm_count = len(landmarks) if landmarks else 0
-        self.lm_label.setText(f'{lm_count} landmarks' if lm_count else 'No hand')
+    def on_frame(self, frame, hands, gestures):
+        self.camera_view.update_frame(frame, hands)
 
-        if gesture and gesture != 'MOVE':
-            label = GESTURE_LABELS.get(gesture, gesture)
-            self.gesture_label.setText(label)
+        total_lm = sum(len(h) for h in hands)
+        self.lm_label.setText(f'{len(hands)} hand(s) · {total_lm} lm' if hands else 'No hands')
+
+        notable = next(
+            (g for g, _ in gestures if g and g != 'MOVE'),
+            None
+        )
+        if notable:
+            self.gesture_label.setText(GESTURE_LABELS.get(notable, notable))
             self._flash_timer.start(900)
-        elif not gesture:
-            pass  # let flash timer clear it
 
     def toggle_pause(self):
         self.engine.paused = not self.engine.paused
         if self.engine.paused:
             self.pause_btn.setText('▶ Resume')
-            self.pause_btn.setProperty('class', 'paused')
             self.pause_btn.setStyleSheet('background: #166534; color: white; border: none; padding: 8px 20px; border-radius: 6px; font-size: 13px;')
         else:
             self.pause_btn.setText('⏸ Pause')

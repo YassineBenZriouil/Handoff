@@ -6,8 +6,9 @@ import screeninfo
 mouse    = MouseController()
 keyboard = KeyboardController()
 
-last_click_time = 0
-CLICK_COOLDOWN  = 0.3
+last_click_time  = 0
+last_rclick_time = 0
+CLICK_COOLDOWN   = 0.3
 
 
 def get_screen_size():
@@ -27,6 +28,23 @@ def click():
         mouse.press(Button.left)
         mouse.release(Button.left)
         last_click_time = now
+
+
+def right_click():
+    global last_rclick_time
+    now = time.time()
+    if now - last_rclick_time > CLICK_COOLDOWN:
+        mouse.press(Button.right)
+        mouse.release(Button.right)
+        last_rclick_time = now
+
+
+def double_click():
+    mouse.press(Button.left)
+    mouse.release(Button.left)
+    time.sleep(0.05)
+    mouse.press(Button.left)
+    mouse.release(Button.left)
 
 
 def swipe_left():
@@ -55,3 +73,16 @@ def zoom_out():
 
 def scroll(direction):
     mouse.scroll(0, 3 if direction == 'up' else -3)
+
+
+def tab_right():
+    with keyboard.pressed(Key.alt):
+        keyboard.press(Key.tab)
+        keyboard.release(Key.tab)
+
+
+def tab_left():
+    with keyboard.pressed(Key.alt):
+        with keyboard.pressed(Key.shift):
+            keyboard.press(Key.tab)
+            keyboard.release(Key.tab)

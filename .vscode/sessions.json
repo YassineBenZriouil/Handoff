@@ -11,7 +11,7 @@
         "autoExecuteCommands": true,
         "icon": "zap",
         "color": "terminal.ansiGreen",
-        "cwd": "${workspaceFolder}/pyui",
+        "cwd": "${workspaceFolder}/ui",
         "commands": [
           "npm run dev"
         ]
